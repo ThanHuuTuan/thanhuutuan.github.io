@@ -6,67 +6,120 @@
   <title>Crypto Converter</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/spark-md5@3.0.2/spark-md5.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/bcryptjs@2.4.3/dist/bcrypt.min.js"></script>
+  <style>
+    body { padding: 1.25rem; background:#f8f9fa }
+    .result-row { display: flex; align-items: center; gap: .5rem; margin-bottom: .5rem; }
+    .result-label { font-weight: bold; color: #0d6efd; min-width: 120px; }
+    .result-value { flex: 1; word-break: break-all; font-family: monospace; }
+    .btn-copy { font-size: .8rem; padding: .15rem .5rem }
+  </style>
 </head>
-<body class="bg-light p-4">
+<body>
   <div class="container">
-    <h1 class="mb-4">Chuyển đổi & Mã hóa</h1>
+    <h1 class="mb-4">Chuyển đổi & Mã hóa (tự động)</h1>
     <div class="mb-3">
       <label class="form-label">Nhập chuỗi</label>
       <textarea id="inputText" class="form-control" rows="3" placeholder="Nhập dữ liệu..."></textarea>
+      <div class="small text-muted mt-1">Kết quả sẽ cập nhật tự động.</div>
     </div>
+
     <div id="results"></div>
   </div>
 
   <script>
-    async function sha256(str) {
-      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
-      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    function base64Encode(str) {
+      const bytes = new TextEncoder().encode(str);
+      let binary = '';
+      const chunk = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunk) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+      }
+      return btoa(binary);
     }
-    async function sha1(str) {
+
+    async function sha256Hex(str) {
+      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+      return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+    }
+    async function sha1Hex(str) {
       const buf = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(str));
-      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+      return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
     }
     function toHex(str) {
-      return Array.from(new TextEncoder().encode(str)).map(b => b.toString(16).padStart(2, '0')).join('');
+      return Array.from(new TextEncoder().encode(str)).map(b => b.toString(16).padStart(2,'0')).join('');
     }
-    function toBase64(str) {
-      return btoa(unescape(encodeURIComponent(str)));
-    }
-    function fromBase64(b64) {
-      try {
-        return decodeURIComponent(escape(atob(b64)));
-      } catch {
-        return 'Base64 không hợp lệ';
+
+    function computeMD5(str) { return SparkMD5.hash(str || ''); }
+
+    function debounce(fn, wait) {
+      let t = null;
+      return function(...args) {
+        clearTimeout(t);
+        t = setTimeout(() => fn.apply(this, args), wait);
       }
     }
 
-    async function convertAll(text) {
-      if (!text) {
-        document.getElementById('results').innerHTML = '';
-        return;
-      }
-      const md5 = SparkMD5.hash(text);
-      const sha256Hash = await sha256(text);
-      const sha1Hash = await sha1(text);
-      const hexStr = toHex(text);
-      const base64Str = toBase64(text);
-      const base64Decode = fromBase64(text);
-      const bcryptHash = await bcrypt.hash(text, 10);
-
-      document.getElementById('results').innerHTML = `
-        <div class="card mb-2"><div class="card-body"><strong>MD5:</strong> ${md5}</div></div>
-        <div class="card mb-2"><div class="card-body"><strong>SHA-1:</strong> ${sha1Hash}</div></div>
-        <div class="card mb-2"><div class="card-body"><strong>SHA-256:</strong> ${sha256Hash}</div></div>
-        <div class="card mb-2"><div class="card-body"><strong>HEX:</strong> ${hexStr}</div></div>
-        <div class="card mb-2"><div class="card-body"><strong>Base64 Encode:</strong> ${base64Str}</div></div>
-        <div class="card mb-2"><div class="card-body"><strong>Base64 Decode:</strong> ${base64Decode}</div></div>
-        <div class="card mb-2"><div class="card-body"><strong>bcrypt:</strong> ${bcryptHash}</div></div>
+    function resultRow(label, value, id) {
+      const safeVal = value === undefined || value === null ? '' : value;
+      return `
+        <div class="result-row" id="block-${id}">
+          <div class="result-label">${label}</div>
+          <div class="result-value">${safeVal}</div>
+          <button class="btn btn-outline-secondary btn-sm btn-copy" data-value='${escapeHtml(safeVal)}'>Copy</button>
+        </div>
       `;
     }
 
-    document.getElementById('inputText').addEventListener('input', (e) => {
-      convertAll(e.target.value);
+    function escapeHtml(str) {
+      return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+    }
+
+    async function convertAndRender(text) {
+      const resultsDiv = document.getElementById('results');
+      if (!text) { resultsDiv.innerHTML = ''; return; }
+
+      resultsDiv.innerHTML = [
+        resultRow('MD5','Calculating...','md5'),
+        resultRow('SHA-1','Calculating...','sha1'),
+        resultRow('SHA-256','Calculating...','sha256'),
+        resultRow('HEX','Calculating...','hex'),
+        resultRow('Base64','Calculating...','b64e')
+      ].join('');
+
+      try {
+        const md5 = computeMD5(text);
+        const sha1 = await sha1Hex(text);
+        const sha256 = await sha256Hex(text);
+        const hex = toHex(text);
+        const b64 = base64Encode(text);
+
+        document.querySelector('#block-md5 .result-value').innerHTML = escapeHtml(md5);
+        document.querySelector('#block-sha1 .result-value').innerHTML = escapeHtml(sha1);
+        document.querySelector('#block-sha256 .result-value').innerHTML = escapeHtml(sha256);
+        document.querySelector('#block-hex .result-value').innerHTML = escapeHtml(hex);
+        document.querySelector('#block-b64e .result-value').innerHTML = escapeHtml(b64);
+
+        document.querySelectorAll('.btn-copy').forEach(btn => {
+          btn.onclick = () => {
+            const val = btn.getAttribute('data-value');
+            const tmp = document.createElement('div'); tmp.innerHTML = val; const textVal = tmp.textContent || tmp.innerText || '';
+            navigator.clipboard.writeText(textVal).then(()=>{
+              btn.textContent = 'Copied'; setTimeout(()=>btn.textContent='Copy',800);
+            });
+          };
+        });
+
+      } catch (err) {
+        resultsDiv.innerHTML = `<div class="alert alert-danger">Lỗi khi chuyển đổi: ${escapeHtml(err.message || err)}</div>`;
+      }
+    }
+
+    const debounced = debounce((e) => convertAndRender(e.target.value), 300);
+    document.getElementById('inputText').addEventListener('input', debounced);
+
+    window.addEventListener('load', () => {
+      const t = document.getElementById('inputText').value;
+      if (t) convertAndRender(t);
     });
   </script>
 </body>
