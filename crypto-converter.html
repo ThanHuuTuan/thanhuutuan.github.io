@@ -15,7 +15,6 @@
       <label class="form-label">Nhập chuỗi</label>
       <textarea id="inputText" class="form-control" rows="3" placeholder="Nhập dữ liệu..."></textarea>
     </div>
-    <button class="btn btn-primary mb-3" onclick="convertAll()">Chuyển đổi</button>
     <div id="results"></div>
   </div>
 
@@ -42,9 +41,11 @@
       }
     }
 
-    async function convertAll() {
-      const text = document.getElementById('inputText').value;
-      if (!text) return;
+    async function convertAll(text) {
+      if (!text) {
+        document.getElementById('results').innerHTML = '';
+        return;
+      }
       const md5 = SparkMD5.hash(text);
       const sha256Hash = await sha256(text);
       const sha1Hash = await sha1(text);
@@ -63,6 +64,10 @@
         <div class="card mb-2"><div class="card-body"><strong>bcrypt:</strong> ${bcryptHash}</div></div>
       `;
     }
+
+    document.getElementById('inputText').addEventListener('input', (e) => {
+      convertAll(e.target.value);
+    });
   </script>
 </body>
 </html>
