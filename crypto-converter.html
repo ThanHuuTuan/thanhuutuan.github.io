@@ -3,198 +3,66 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Text → MD5 / SHA-256 / bcrypt / AES</title>
+  <title>Crypto Converter</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-  <!-- libs: spark-md5 (md5), bcryptjs -->
   <script src="https://cdn.jsdelivr.net/npm/spark-md5@3.0.2/spark-md5.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/bcryptjs@2.4.3/dist/bcrypt.min.js"></script>
-  <style>
-    body { padding: 1.25rem; background:#f8f9fa }
-    textarea, input { font-family: monospace; }
-    pre.output { white-space: pre-wrap; word-break: break-word; background:#fff; padding:0.75rem; border:1px solid #dee2e6 }
-  </style>
 </head>
-<body>
+<body class="bg-light p-4">
   <div class="container">
-    <h3 class="mb-3">Text → MD5 / SHA-256 / bcrypt / AES</h3>
-
-    <div class="row g-3">
-      <div class="col-md-6">
-        <div class="card shadow-sm mb-3">
-          <div class="card-body">
-            <label class="form-label">Text / Plain</label>
-            <textarea id="txt" class="form-control" rows="6" placeholder="Nhập văn bản muốn mã hóa"></textarea>
-
-            <div class="mt-2">
-              <label class="form-label">bcrypt rounds</label>
-              <input id="bcryptRounds" class="form-control form-control-sm" value="10" type="number" min="4" max="15">
-            </div>
-
-            <div class="mt-2">
-              <label class="form-label">AES password (để mã hóa/giải mã)</label>
-              <input id="aesPass" class="form-control" type="text" placeholder="mật khẩu AES...">
-              <div class="form-text">AES-GCM + PBKDF2 để derive key. Lưu trữ IV & salt cùng output (base64).</div>
-            </div>
-
-            <div class="mt-3 d-flex gap-2 flex-wrap">
-              <button id="btnAll" class="btn btn-primary">Tạo tất cả</button>
-              <button id="btnCopyAll" class="btn btn-outline-secondary">Copy tất cả</button>
-              <button id="btnClear" class="btn btn-outline-danger">Clear</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="card shadow-sm">
-          <div class="card-body">
-            <h6>AES Tools</h6>
-            <div class="d-flex gap-2">
-              <button id="btnAesEnc" class="btn btn-success btn-sm">AES Encrypt</button>
-              <button id="btnAesDec" class="btn btn-warning btn-sm">AES Decrypt</button>
-            </div>
-            <div class="form-text mt-2">AES Encrypt sẽ xuất base64 chứa: salt:iv:ciphertext</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="col-md-6">
-        <div class="card shadow-sm mb-2">
-          <div class="card-body">
-            <h6>Results</h6>
-            <label class="form-label">MD5</label>
-            <pre id="outMd5" class="output">-</pre>
-
-            <label class="form-label">SHA-256 (hex)</label>
-            <pre id="outSha" class="output">-</pre>
-
-            <label class="form-label">bcrypt</label>
-            <pre id="outBcrypt" class="output">-</pre>
-
-            <label class="form-label">AES (base64 salt:iv:cipher)</label>
-            <pre id="outAes" class="output">-</pre>
-          </div>
-        </div>
-
-        <div class="card shadow-sm">
-          <div class="card-body">
-            <h6>Tips</h6>
-            <ul>
-              <li>MD5 không an toàn cho bảo mật — chỉ dùng checksum.</li>
-              <li>bcrypt dùng cho hashing password (chậm có chủ ý).</li>
-              <li>AES-GCM dùng cho mã hóa dữ liệu — cần giữ password an toàn.</li>
-            </ul>
-          </div>
-        </div>
-
-      </div>
+    <h1 class="mb-4">Chuyển đổi & Mã hóa</h1>
+    <div class="mb-3">
+      <label class="form-label">Nhập chuỗi</label>
+      <textarea id="inputText" class="form-control" rows="3" placeholder="Nhập dữ liệu..."></textarea>
     </div>
+    <button class="btn btn-primary mb-3" onclick="convertAll()">Chuyển đổi</button>
+    <div id="results"></div>
   </div>
 
-<script>
-  // MD5 via SparkMD5
-  function computeMD5(text) {
-    return SparkMD5.hash(text || '');
-  }
-
-  // SHA-256 using SubtleCrypto -> hex
-  async function computeSHA256(text) {
-    const enc = new TextEncoder();
-    const data = enc.encode(text || '');
-    const hash = await crypto.subtle.digest('SHA-256', data);
-    return Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('');
-  }
-
-  // bcrypt via bcryptjs (runs in main thread, async-looking API)
-  function computeBcrypt(text, rounds) {
-    return new Promise((resolve, reject) => {
-      try {
-        bcrypt.genSalt(parseInt(rounds,10), (err, salt) => {
-          if (err) return reject(err);
-          bcrypt.hash(text, salt, (err2, hash) => {
-            if (err2) return reject(err2);
-            resolve(hash);
-          });
-        });
-      } catch (e) { reject(e); }
-    });
-  }
-
-  // AES-GCM with PBKDF2 derive key. Output base64: salt:iv:cipher
-  async function aesEncrypt(text, password) {
-    if (!password) throw new Error('Missing AES password');
-    const enc = new TextEncoder();
-    const salt = crypto.getRandomValues(new Uint8Array(16));
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-
-    // derive key
-    const baseKey = await crypto.subtle.importKey('raw', enc.encode(password), {name:'PBKDF2'}, false, ['deriveKey']);
-    const key = await crypto.subtle.deriveKey({name:'PBKDF2', salt: salt, iterations: 100000, hash: 'SHA-256'}, baseKey, {name:'AES-GCM', length:256}, false, ['encrypt']);
-
-    const cipher = await crypto.subtle.encrypt({name: 'AES-GCM', iv: iv}, key, enc.encode(text || ''));
-
-    // return base64(salt):base64(iv):base64(cipher)
-    return [salt, iv, new Uint8Array(cipher)].map(arr => btoa(String.fromCharCode(...arr))).join(':');
-  }
-
-  async function aesDecrypt(base64combo, password) {
-    if (!password) throw new Error('Missing AES password');
-    const parts = base64combo.split(':');
-    if (parts.length !== 3) throw new Error('Invalid AES format');
-    const dec = new TextDecoder();
-    const salt = Uint8Array.from(atob(parts[0]), c=>c.charCodeAt(0));
-    const iv = Uint8Array.from(atob(parts[1]), c=>c.charCodeAt(0));
-    const cipher = Uint8Array.from(atob(parts[2]), c=>c.charCodeAt(0));
-
-    const enc = new TextEncoder();
-    const baseKey = await crypto.subtle.importKey('raw', enc.encode(password), {name:'PBKDF2'}, false, ['deriveKey']);
-    const key = await crypto.subtle.deriveKey({name:'PBKDF2', salt: salt, iterations: 100000, hash: 'SHA-256'}, baseKey, {name:'AES-GCM', length:256}, false, ['decrypt']);
-
-    const plain = await crypto.subtle.decrypt({name:'AES-GCM', iv: iv}, key, cipher);
-    return dec.decode(plain);
-  }
-
-  // UI hookups
-  const txt = document.getElementById('txt');
-  const outMd5 = document.getElementById('outMd5');
-  const outSha = document.getElementById('outSha');
-  const outBcrypt = document.getElementById('outBcrypt');
-  const outAes = document.getElementById('outAes');
-  const bcryptRounds = document.getElementById('bcryptRounds');
-  const aesPass = document.getElementById('aesPass');
-
-  document.getElementById('btnAll').addEventListener('click', async () => {
-    const text = txt.value || '';
-    outMd5.textContent = 'Calculating...'; outSha.textContent = 'Calculating...'; outBcrypt.textContent = 'Calculating...'; outAes.textContent = 'Calculating...';
-    try {
-      outMd5.textContent = computeMD5(text);
-      outSha.textContent = await computeSHA256(text);
-      outBcrypt.textContent = await computeBcrypt(text, bcryptRounds.value);
-      outAes.textContent = await aesEncrypt(text, aesPass.value);
-    } catch (e) {
-      alert('Lỗi: ' + e.message);
+  <script>
+    async function sha256(str) {
+      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
     }
-  });
+    async function sha1(str) {
+      const buf = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(str));
+      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+    function toHex(str) {
+      return Array.from(new TextEncoder().encode(str)).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+    function toBase64(str) {
+      return btoa(unescape(encodeURIComponent(str)));
+    }
+    function fromBase64(b64) {
+      try {
+        return decodeURIComponent(escape(atob(b64)));
+      } catch {
+        return 'Base64 không hợp lệ';
+      }
+    }
 
-  document.getElementById('btnCopyAll').addEventListener('click', () => {
-    const all = `MD5: ${outMd5.textContent}\nSHA256: ${outSha.textContent}\nbcrypt: ${outBcrypt.textContent}\nAES: ${outAes.textContent}`;
-    navigator.clipboard.writeText(all).then(()=> alert('Copied all to clipboard'));
-  });
+    async function convertAll() {
+      const text = document.getElementById('inputText').value;
+      if (!text) return;
+      const md5 = SparkMD5.hash(text);
+      const sha256Hash = await sha256(text);
+      const sha1Hash = await sha1(text);
+      const hexStr = toHex(text);
+      const base64Str = toBase64(text);
+      const base64Decode = fromBase64(text);
+      const bcryptHash = await bcrypt.hash(text, 10);
 
-  document.getElementById('btnClear').addEventListener('click', () => {
-    txt.value = '';
-    outMd5.textContent = '-'; outSha.textContent = '-'; outBcrypt.textContent = '-'; outAes.textContent = '-';
-  });
-
-  document.getElementById('btnAesEnc').addEventListener('click', async () => {
-    try {
-      outAes.textContent = await aesEncrypt(txt.value || '', aesPass.value);
-    } catch (e) { alert('AES encrypt error: ' + e.message); }
-  });
-
-  document.getElementById('btnAesDec').addEventListener('click', async () => {
-    try {
-      outAes.textContent = await aesDecrypt(outAes.textContent.trim(), aesPass.value);
-    } catch (e) { alert('AES decrypt error: ' + e.message); }
-  });
-</script>
+      document.getElementById('results').innerHTML = `
+        <div class="card mb-2"><div class="card-body"><strong>MD5:</strong> ${md5}</div></div>
+        <div class="card mb-2"><div class="card-body"><strong>SHA-1:</strong> ${sha1Hash}</div></div>
+        <div class="card mb-2"><div class="card-body"><strong>SHA-256:</strong> ${sha256Hash}</div></div>
+        <div class="card mb-2"><div class="card-body"><strong>HEX:</strong> ${hexStr}</div></div>
+        <div class="card mb-2"><div class="card-body"><strong>Base64 Encode:</strong> ${base64Str}</div></div>
+        <div class="card mb-2"><div class="card-body"><strong>Base64 Decode:</strong> ${base64Decode}</div></div>
+        <div class="card mb-2"><div class="card-body"><strong>bcrypt:</strong> ${bcryptHash}</div></div>
+      `;
+    }
+  </script>
 </body>
 </html>
