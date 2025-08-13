@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>JWT Parser & Verify — giống jwt.io (client‑side)</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background: #f8f9fa; padding: 1.25rem; }
+    .editor { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .token-input { height: 22vh; resize: vertical; }
+    .codebox { background: #fff; border: 1px solid #dee2e6; padding: .75rem; border-radius: .5rem; overflow: auto; }
+    .codebox pre { margin: 0; }
+    .section-title { font-size: .9rem; font-weight: 600; color: #6c757d; letter-spacing: .02em; }
+    .chip { display:inline-block; padding:.1rem .4rem; border-radius:.25rem; font-size:.75rem; background:#e9ecef; margin-right:.25rem }
+    .claim-badge { font-size:.75rem; }
+    .tree { max-height: 34vh; overflow: auto; }
+    .key { color:#0d6efd }
+    .string { color:#198754 }
+    .number { color:#d63384 }
+    .bool { color:#fd7e14 }
+    .null { color:#6c757d }
+    .collapser { cursor:pointer; user-select:none; font-weight:700; margin-right:.35rem }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .nowrap { white-space: nowrap; }
+    .sig-ok { color:#198754 }
+    .sig-bad { color:#dc3545 }
+    .sig-na { color:#6c757d }
+    .small-muted { font-size:.85rem; color:#6c757d }
+    .part { border-radius:.35rem; padding:.25rem .35rem }
+    .part.header { background:#ffe8cc }
+    .part.payload { background:#e7f5ff }
+    .part.signature { background:#e6fcf5 }
+  </style>
+</head>
+<body>
+  <div class="container-xxl">
+    <div class="d-flex align-items-center justify-content-between mb-3">
+      <h3 class="mb-0">JWT Parser & Verifier <span class="badge text-bg-secondary">client‑side</span></h3>
+      <div class="d-flex gap-2">
+        <button id="btnSampleHS" class="btn btn-outline-secondary btn-sm">Load sample HS256</button>
+        <button id="btnSampleRS" class="btn btn-outline-secondary btn-sm">Load sample RS256</button>
+        <button id="btnClearAll" class="btn btn-outline-danger btn-sm">Clear</button>
+      </div>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-lg-7">
+        <div class="card shadow-sm">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <span class="section-title">Token</span>
+              <div class="small-muted">Dữ liệu xử lý hoàn toàn trên trình duyệt.</div>
+            </div>
+            <textarea id="jwtInput" class="form-control editor token-input editor" placeholder="Dán JWT vào đây (header.payload.signature)"></textarea>
+
+            <div class="d-flex flex-wrap gap-2 mt-3">
+              <button id="btnDecode" class="btn btn-primary btn-sm">Decode</button>
+              <button id="btnVerify" class="btn btn-success btn-sm">Verify signature</button>
+              <button id="btnMinify" class="btn btn-outline-secondary btn-sm">Minify token</button>
+              <button id="btnBeautify" class="btn btn-outline-secondary btn-sm">Beautify token</button>
+            </div>
+
+            <hr/>
+            <div class="row g-3">
+              <div class="col-md-12">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                  <span class="section-title">Key / Secret</span>
+                  <span id="keyHint" class="small-muted">Tuỳ theo <span class="mono">alg</span> trong header</span>
+                </div>
+                <textarea id="keyInput" class="form-control editor" rows="5" placeholder="HMAC: gõ secret\nRSA/ECDSA: dán PUBLIC KEY (PEM)"></textarea>
+                <div class="form-text">HS*: dùng secret thô. RS*/ES*: dùng <strong>public key</strong> dạng PEM (-----BEGIN PUBLIC KEY-----).</div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <div class="col-lg-5">
+        <div class="card shadow-sm mb-3">
+          <div class="card-body">
+            <div class="section-title mb-2">Decode kết quả</div>
+            <div class="mb-2 small">
+              <span class="part header">header</span>
+              <span class="part payload">payload</span>
+              <span class="part signature">signature</span>
+            </div>
+            <div class="codebox mb-2"><pre id="partsPre" class="editor"></pre></div>
+            <div class="row g-2">
+              <div class="col-6">
+                <div class="codebox"><pre id="headerPre" class="editor"></pre></div>
+              </div>
+              <div class="col-6">
+                <div class="codebox"><pre id="payloadPre" class="editor"></pre></div>
+              </div>
+            </div>
+            <div class="mt-2 tree" id="payloadTree"></div>
+          </div>
+        </div>
+
+        <div class="card shadow-sm">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center">
+              <div class="section-title">Signature verify</div>
+              <div id="algBadge" class="chip mono">alg: ?</div>
+            </div>
+            <div id="verifyStatus" class="mt-2 small-muted">Chưa kiểm tra.</div>
+            <div id="claims" class="mt-2"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mt-4 small-muted">
+      Hỗ trợ: HS256/384/512, RS256/384/512, ES256/384/512, none. ECDSA cần chữ ký raw (r||s) theo chuẩn JWS.
+    </div>
+  </div>
+
+<script>
+// ===== Utilities =====
+const enc = new TextEncoder();
+const dec = new TextDecoder();
+
+function b64urlToUint8Array(b64url) {
+  let p = b64url.replace(/-/g, '+').replace(/_/g, '/');
+  const pad = p.length % 4 === 2 ? '==' : p.length % 4 === 3 ? '=' : p.length % 4 === 1 ? '===' : '';
+  p += pad;
+  const raw = atob(p);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
+}
+function uint8ArrayToB64url(arr) {
+  let s = '';
+  for (let i = 0; i < arr.length; i++) s += String.fromCharCode(arr[i]);
+  let b64 = btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/,'');
+  return b64;
+}
+
+function parseJWT(token) {
+  const parts = token.trim().split('.');
+  if (parts.length !== 3 && parts.length !== 2) throw new Error('JWT phải có 3 phần (hoặc 2 nếu alg=none).');
+  const [h, p, s=''] = parts;
+  const header = JSON.parse(dec.decode(b64urlToUint8Array(h)));
+  const payload = JSON.parse(dec.decode(b64urlToUint8Array(p)));
+  const sigBytes = s ? b64urlToUint8Array(s) : new Uint8Array();
+  return { header, payload, signature: sigBytes, signingInput: `${h}.${p}`, raw: {h, p, s} };
+}
+
+function pretty(obj){ return JSON.stringify(obj, null, 2); }
+function nowEpoch(){ return Math.floor(Date.now()/1000); }
+
+// Render small JSON tree for payload
+function renderTree(container, obj) {
+  container.innerHTML = '';
+  container.appendChild(node(null, obj));
+  function node(key, value){
+    const wrap = document.createElement('div');
+    const t = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
+    if (t === 'object' || t === 'array'){
+      const head = document.createElement('div');
+      const col = document.createElement('span'); col.className='collapser'; col.textContent='-';
+      const body = document.createElement('div'); body.style.paddingLeft='.85rem';
+      col.onclick = ()=>{ body.style.display = body.style.display==='none'?'':'none'; col.textContent = col.textContent==='-'?'+':'-'; };
+      head.appendChild(col);
+      if (key!==null){ const k=document.createElement('span'); k.className='key'; k.textContent=key+': '; head.appendChild(k); }
+      wrap.appendChild(head);
+      const entries = t==='array' ? value.map((v,i)=>[i,v]) : Object.entries(value);
+      for (const [k,v] of entries) body.appendChild(node(k,v));
+      wrap.appendChild(body);
+    } else {
+      if (key!==null){ const k=document.createElement('span'); k.className='key'; k.textContent=key+': '; wrap.appendChild(k); }
+      const val=document.createElement('span');
+      if (t==='string'){ val.className='string'; val.textContent='"'+value+'"'; }
+      else if (t==='number'){ val.className='number'; val.textContent=value; }
+      else if (t==='boolean'){ val.className='bool'; val.textContent=value; }
+      else { val.className='null'; val.textContent='null'; }
+      wrap.appendChild(val);
+    }
+    return wrap;
+  }
+}
+
+// ===== PEM helpers =====
+function parsePEM(pem){
+  const m = pem.replace(/\r/g,'').replace(/\n/g,'').match(/-----BEGIN[^-]+-----([A-Za-z0-9+/=]+)-----END[^-]+-----/);
+  if (!m) throw new Error('PEM không hợp lệ. Cần dạng -----BEGIN PUBLIC KEY-----');
+  const binStr = atob(m[1]);
+  const bytes = new Uint8Array(binStr.length);
+  for (let i=0;i<binStr.length;i++) bytes[i]=binStr.charCodeAt(i);
+  return bytes.buffer;
+}
+
+// Convert raw (r||s) signature to DER for WebCrypto ECDSA verify
+function rawToDerEcdsa(raw){
+  // raw is Uint8Array length 64 (P-256) or 96 (P-384) or 132 (P-521 -> 132 bytes when using ceil(521/8)=66 per coord)
+  function trimLeadingZeros(buf){ let i=0; while (i<buf.length-1 && buf[i]===0) i++; return buf.slice(i); }
+  const n = raw.length/2; const r = trimLeadingZeros(raw.slice(0,n)); const s = trimLeadingZeros(raw.slice(n));
+  function toIntegerASN1(x){
+    // If high bit is set, prepend 0x00
+    const needsPad = x.length>0 && (x[0] & 0x80);
+    const len = needsPad ? x.length+1 : x.length;
+    const out = new Uint8Array(2 + len);
+    out[0]=0x02; out[1]=len; // INTEGER
+    let o=2; if (needsPad) { out[o++]=0x00; }
+    out.set(x, o);
+    return out;
+  }
+  const rInt = toIntegerASN1(r);
+  const sInt = toIntegerASN1(s);
+  const seqLen = rInt.length + sInt.length;
+  const der = new Uint8Array(2 + seqLen);
+  der[0]=0x30; der[1]=seqLen; // SEQUENCE
+  der.set(rInt,2);
+  der.set(sInt,2+rInt.length);
+  return der;
+}
+
+// ===== Verify implementations (WebCrypto) =====
+const algMap = {
+  HS256: { algo: {name:'HMAC', hash:'SHA-256'}, import: (key)=>crypto.subtle.importKey('raw', enc.encode(key), {name:'HMAC', hash:'SHA-256'}, false, ['sign','verify']), sign: 'HMAC' },
+  HS384: { algo: {name:'HMAC', hash:'SHA-384'}, import: (key)=>crypto.subtle.importKey('raw', enc.encode(key), {name:'HMAC', hash:'SHA-384'}, false, ['sign','verify']), sign: 'HMAC' },
+  HS512: { algo: {name:'HMAC', hash:'SHA-512'}, import: (key)=>crypto.subtle.importKey('raw', enc.encode(key), {name:'HMAC', hash:'SHA-512'}, false, ['sign','verify']), sign: 'HMAC' },
+  RS256: { algo: {name:'RSASSA-PKCS1-v1_5', hash:'SHA-256'}, import: (pem)=>crypto.subtle.importKey('spki', parsePEM(pem), {name:'RSASSA-PKCS1-v1_5', hash:'SHA-256'}, false, ['verify']), sign: 'RSA' },
+  RS384: { algo: {name:'RSASSA-PKCS1-v1_5', hash:'SHA-384'}, import: (pem)=>crypto.subtle.importKey('spki', parsePEM(pem), {name:'RSASSA-PKCS1-v1_5', hash:'SHA-384'}, false, ['verify']), sign: 'RSA' },
+  RS512: { algo: {name:'RSASSA-PKCS1-v1_5', hash:'SHA-512'}, import: (pem)=>crypto.subtle.importKey('spki', parsePEM(pem), {name:'RSASSA-PKCS1-v1_5', hash:'SHA-512'}, false, ['verify']), sign: 'RSA' },
+  ES256: { algo: {name:'ECDSA', namedCurve:'P-256', hash:'SHA-256'}, import: (pem)=>crypto.subtle.importKey('spki', parsePEM(pem), {name:'ECDSA', namedCurve:'P-256'}, false, ['verify']), sign: 'ECDSA' },
+  ES384: { algo: {name:'ECDSA', namedCurve:'P-384', hash:'SHA-384'}, import: (pem)=>crypto.subtle.importKey('spki', parsePEM(pem), {name:'ECDSA', namedCurve:'P-384'}, false, ['verify']), sign: 'ECDSA' },
+  ES512: { algo: {name:'ECDSA', namedCurve:'P-521', hash:'SHA-512'}, import: (pem)=>crypto.subtle.importKey('spki', parsePEM(pem), {name:'ECDSA', namedCurve:'P-521'}, false, ['verify']), sign: 'ECDSA' },
+  none:  { }
+};
+
+async function verifySignature(parsed, keyInput) {
+  const {header, signature, signingInput} = parsed;
+  const alg = header.alg;
+  document.getElementById('algBadge').textContent = 'alg: ' + alg;
+
+  if (!alg || alg === 'none') {
+    return { ok: signature.length === 0, detail: 'alg=none' };
+  }
+  const spec = algMap[alg];
+  if (!spec) throw new Error('Thuật toán không hỗ trợ: ' + alg);
+
+  if (spec.sign === 'HMAC') {
+    if (!keyInput) throw new Error('Cần nhập secret cho HMAC');
+    const key = await spec.import(keyInput);
+    const data = enc.encode(signingInput);
+    const expected = new Uint8Array(await crypto.subtle.sign(spec.algo, key, data));
+    const ok = expected.length === signature.length && expected.every((b,i)=>b===signature[i]);
+    return { ok, detail: ok ? 'HMAC match' : 'HMAC mismatch' };
+  }
+  if (spec.sign === 'RSA') {
+    if (!keyInput) throw new Error('Cần PUBLIC KEY (PEM) cho RS*');
+    const key = await spec.import(keyInput);
+    const ok = await crypto.subtle.verify(spec.algo, key, signature, enc.encode(signingInput));
+    return { ok, detail: ok ? 'RSA verify OK' : 'RSA verify FAIL' };
+  }
+  if (spec.sign === 'ECDSA') {
+    if (!keyInput) throw new Error('Cần PUBLIC KEY (PEM) cho ES*');
+    const key = await spec.import(keyInput);
+    const der = rawToDerEcdsa(signature);
+    const ok = await crypto.subtle.verify({name:'ECDSA', hash: spec.algo.hash}, key, der, enc.encode(signingInput));
+    return { ok, detail: ok ? 'ECDSA verify OK' : 'ECDSA verify FAIL' };
+  }
+  throw new Error('Không thể xác minh cho thuật toán này');
+}
+
+// ===== Claim checks =====
+function renderClaims(payload){
+  const c = document.getElementById('claims');
+  const now = nowEpoch();
+  const items = [];
+  if ('iss' in payload) items.push(`<span class="badge text-bg-light claim-badge">iss: <span class="mono">${payload.iss}</span></span>`);
+  if ('sub' in payload) items.push(`<span class="badge text-bg-light claim-badge">sub: <span class="mono">${payload.sub}</span></span>`);
+  if ('aud' in payload) items.push(`<span class="badge text-bg-light claim-badge">aud: <span class="mono">${Array.isArray(payload.aud)?payload.aud.join(', '):payload.aud}</span></span>`);
+  if ('iat' in payload) items.push(`<span class="badge text-bg-${payload.iat<=now?'success':'warning'} claim-badge">iat: ${payload.iat} (${new Date(payload.iat*1000).toLocaleString()})</span>`);
+  if ('nbf' in payload) items.push(`<span class="badge text-bg-${payload.nbf<=now?'success':'warning'} claim-badge">nbf: ${payload.nbf} (${new Date(payload.nbf*1000).toLocaleString()})</span>`);
+  if ('exp' in payload) items.push(`<span class="badge text-bg-${payload.exp>now?'success':'danger'} claim-badge">exp: ${payload.exp} (${new Date(payload.exp*1000).toLocaleString()})</span>`);
+  c.innerHTML = items.join(' ');
+}
+
+// ===== UI wiring =====
+const el = {
+  jwtInput: document.getElementById('jwtInput'),
+  keyInput: document.getElementById('keyInput'),
+  partsPre: document.getElementById('partsPre'),
+  headerPre: document.getElementById('headerPre'),
+  payloadPre: document.getElementById('payloadPre'),
+  payloadTree: document.getElementById('payloadTree'),
+  verifyStatus: document.getElementById('verifyStatus'),
+  keyHint: document.getElementById('keyHint'),
+  algBadge: document.getElementById('algBadge')
+};
+
+function setStatus(text, type){
+  el.verifyStatus.textContent = text;
+  el.verifyStatus.className = type === 'ok' ? 'sig-ok' : type === 'bad' ? 'sig-bad' : 'sig-na';
+}
+
+function updateKeyHint(alg){
+  if (!alg) { el.keyHint.textContent = 'Chưa rõ thuật toán'; return; }
+  if (alg.startsWith('HS')) el.keyHint.innerHTML = 'Yêu cầu <b>secret</b> (HMAC)';
+  else if (alg.startsWith('RS') || alg.startsWith('PS')) el.keyHint.innerHTML = 'Yêu cầu <b>PUBLIC KEY</b> (PEM) cho RSA';
+  else if (alg.startsWith('ES')) el.keyHint.innerHTML = 'Yêu cầu <b>PUBLIC KEY</b> (PEM) cho ECDSA';
+  else if (alg === 'none') el.keyHint.textContent = 'Không có chữ ký';
+  else el.keyHint.textContent = 'Thuật toán: ' + alg;
+}
+
+function decodeOnly(){
+  try {
+    const parsed = parseJWT(el.jwtInput.value);
+    el.partsPre.textContent = [parsed.raw.h, parsed.raw.p, parsed.raw.s].join('\n');
+    el.headerPre.textContent = pretty(parsed.header);
+    el.payloadPre.textContent = pretty(parsed.payload);
+    renderTree(el.payloadTree, parsed.payload);
+    renderClaims(parsed.payload);
+    updateKeyHint(parsed.header.alg);
+    document.getElementById('algBadge').textContent = 'alg: ' + parsed.header.alg;
+    setStatus('Đã decode. Chưa verify.', 'na');
+  } catch (e) {
+    setStatus('Decode lỗi: ' + e.message, 'bad');
+    el.partsPre.textContent = '';
+    el.headerPre.textContent = '';
+    el.payloadPre.textContent = '';
+    el.payloadTree.innerHTML = '';
+    document.getElementById('claims').innerHTML = '';
+  }
+}
+
+async function doVerify(){
+  try {
+    const parsed = parseJWT(el.jwtInput.value);
+    const res = await verifySignature(parsed, el.keyInput.value.trim());
+    decodeOnly();
+    setStatus(res.ok ? '✅ Signature hợp lệ — ' + res.detail : '❌ Signature KHÔNG hợp lệ — ' + res.detail, res.ok ? 'ok':'bad');
+  } catch (e) {
+    setStatus('Verify lỗi: ' + (e.message || e), 'bad');
+  }
+}
+
+// Minify / Beautify token (add/remove whitespace/newlines between parts)
+function minifyToken(){ el.jwtInput.value = el.jwtInput.value.replace(/\s+/g,'').trim(); }
+function beautifyToken(){ el.jwtInput.value = el.jwtInput.value.replace(/\s*/g,'').replace(/\./g,'.\n'); }
+
+// Buttons
+ document.getElementById('btnDecode').onclick = decodeOnly;
+ document.getElementById('btnVerify').onclick = doVerify;
+ document.getElementById('btnMinify').onclick = ()=>{ minifyToken(); };
+ document.getElementById('btnBeautify').onclick = ()=>{ beautifyToken(); };
+ document.getElementById('btnClearAll').onclick = ()=>{
+  el.jwtInput.value=''; el.keyInput.value='';
+  el.partsPre.textContent=''; el.headerPre.textContent=''; el.payloadPre.textContent='';
+  el.payloadTree.innerHTML=''; document.getElementById('claims').innerHTML='';
+  setStatus('Đã xóa.', 'na'); updateKeyHint(''); document.getElementById('algBadge').textContent='alg: ?';
+ };
+
+ // Samples (generated just for demo)
+ document.getElementById('btnSampleHS').onclick = ()=>{
+   // Header {alg:HS256, typ:JWT}, payload {sub:"1234567890", name:"John Doe", iat:1516239022}
+   // secret: secret
+   el.jwtInput.value = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.TJVA95OrM7E2cBab30RMHrHDcEfxjoYZgeFONFh7HgQ';
+   el.keyInput.value = 'secret';
+   decodeOnly();
+ };
+ document.getElementById('btnSampleRS').onclick = ()=>{
+   // Minimal RS256 sample (public key + token must match). Using a tiny demo keypair, not for production.
+   el.keyInput.value = `-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApjQZgQbqYQ2lKxXvF1iU\n6p5m3g8yX2c0S3Cj9zIh6Gq0bqA1w8y5Q8cJq8x1h1lIh6FfWgQ7jGJ0s2ZxYH3B\nYfZ/3Qn6h8x6W8JvYwK0oQ0c8w5m3r2pVqA0M3Jm9xgYjQy3mS1M0Jj3c0+5qv1q\n8Xq8b1y8r5e8d1q0u1d3m6s5t4a3k2j1h0g9f8e7d6c5b4a3s2d1f0g9h8j7k6l5\n4m3n2b1v2c3x4z5y6w7v8u9t0s1r2q3p4o5n6m7l8k9j0i1h2g3f4e5d6c7b8a9\nQIDAQAB\n-----END PUBLIC KEY-----`;
+   // This RS256 token will fail unless it was signed with the paired private key. Keep for UI demo.
+   el.jwtInput.value = 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJkZW1vIjoicnNhIn0.ZXhhbXBsZVNpZ25hdHVyZUJhc2U2NA';
+   decodeOnly();
+ };
+
+ // Auto‑decode on paste
+ el.jwtInput.addEventListener('input', ()=>{
+   try { const {header} = parseJWT(el.jwtInput.value); updateKeyHint(header.alg); document.getElementById('algBadge').textContent = 'alg: '+header.alg; } catch {}
+ });
+</script>
+</body>
+</html>
