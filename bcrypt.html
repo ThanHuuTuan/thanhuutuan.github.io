@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bcrypt Hash Generator</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background: #f8fafc; }
+    .card { border-radius: 12px; box-shadow: 0 6px 20px rgba(20,20,50,0.06); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", monospace; }
+  </style>
+</head>
+<body>
+  <div class="container py-5">
+    <div class="row justify-content-center">
+      <div class="col-lg-7">
+        <div class="card p-4">
+          <h3 class="mb-3">Bcrypt Hash Generator</h3>
+          <p class="text-muted">Tạo và kiểm tra hash bcrypt hoàn toàn trong trình duyệt (client-side) bằng <code>bcryptjs</code>.</p>
+
+          <form id="form">
+            <div class="mb-3">
+              <label class="form-label">Plain text / Password</label>
+              <input id="inputText" class="form-control" placeholder="Nhập mật khẩu hoặc chuỗi cần mã hóa" autocomplete="off">
+            </div>
+
+            <div class="row g-2 mb-3">
+              <div class="col-8">
+                <label class="form-label">Salt rounds</label>
+                <input id="saltRounds" type="number" min="4" max="16" value="12" class="form-control">
+                <div class="form-text">Số vòng salt càng cao => an toàn hơn nhưng chậm hơn. 10-12 là hợp lý cho client-side.</div>
+              </div>
+              <div class="col-4 d-flex align-items-end">
+                <button id="generateBtn" type="button" class="btn btn-primary w-100">Generate</button>
+              </div>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">Resulting bcrypt hash</label>
+              <div class="input-group">
+                <textarea id="outputHash" class="form-control mono" rows="3" readonly placeholder="Hash sẽ hiển thị ở đây"></textarea>
+                <button id="copyBtn" class="btn btn-outline-secondary" type="button">Copy</button>
+              </div>
+            </div>
+
+            <hr>
+
+            <h5>Verify</h5>
+            <div class="mb-3">
+              <label class="form-label">Password to verify</label>
+              <input id="verifyText" class="form-control" placeholder="Nhập mật khẩu để kiểm tra">
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Hash to verify against</label>
+              <input id="verifyHash" class="form-control mono" placeholder="Dán hash bcrypt tại đây">
+            </div>
+            <div class="d-flex gap-2">
+              <button id="verifyBtn" type="button" class="btn btn-success">Verify</button>
+              <button id="clearBtn" type="button" class="btn btn-outline-secondary">Clear</button>
+              <div id="status" class="ms-auto align-self-center"></div>
+            </div>
+
+          </form>
+
+          <footer class="mt-4 text-muted small">Lưu ý: tạo hash trên client có rủi ro bảo mật nếu bạn xử lý mật khẩu người dùng thật sự. Chỉ dùng cho mục đích thử nghiệm hoặc mã hoá chuỗi không nhạy cảm.</footer>
+        </div>
+
+        <div class="text-center mt-3 text-muted small">Made with Bootstrap + bcryptjs</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/bcryptjs/2.4.3/bcrypt.min.js"></script>
+  <script>
+    // Elements
+    const inputText = document.getElementById('inputText');
+    const saltRounds = document.getElementById('saltRounds');
+    const generateBtn = document.getElementById('generateBtn');
+    const outputHash = document.getElementById('outputHash');
+    const copyBtn = document.getElementById('copyBtn');
+
+    const verifyText = document.getElementById('verifyText');
+    const verifyHash = document.getElementById('verifyHash');
+    const verifyBtn = document.getElementById('verifyBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const status = document.getElementById('status');
+
+    function setStatus(msg, type) {
+      status.textContent = msg;
+      status.className = 'ms-auto align-self-center badge rounded-pill';
+      if (type === 'ok') status.classList.add('bg-success');
+      else if (type === 'bad') status.classList.add('bg-danger');
+      else status.classList.add('bg-secondary');
+    }
+
+    generateBtn.addEventListener('click', async () => {
+      const txt = inputText.value || '';
+      const rounds = parseInt(saltRounds.value, 10) || 12;
+      if (!txt.trim()) {
+        alert('Vui lòng nhập chuỗi hoặc mật khẩu để mã hóa.');
+        return;
+      }
+      if (rounds < 4 || rounds > 16) {
+        alert('Salt rounds hợp lệ nằm trong khoảng 4 - 16.');
+        return;
+      }
+
+      generateBtn.disabled = true;
+      generateBtn.innerHTML = 'Generating...';
+      outputHash.value = '';
+      setStatus('Đang tạo hash...', 'busy');
+
+      try {
+        // bcryptjs supports genSaltSync and hashSync as well, but we use async to avoid blocking UI
+        const salt = await bcrypt.genSalt(rounds);
+        const hash = await bcrypt.hash(txt, salt);
+        outputHash.value = hash;
+        // fill verify hash by default to make verification quicker
+        verifyHash.value = hash;
+        setStatus('Hoàn tất', 'ok');
+      } catch (e) {
+        console.error(e);
+        setStatus('Lỗi khi tạo hash', 'bad');
+        alert('Đã có lỗi xảy ra: ' + e.message);
+      } finally {
+        generateBtn.disabled = false;
+        generateBtn.innerHTML = 'Generate';
+      }
+    });
+
+    copyBtn.addEventListener('click', async () => {
+      const val = outputHash.value;
+      if (!val) return;
+      try {
+        await navigator.clipboard.writeText(val);
+        copyBtn.textContent = 'Copied!';
+        setTimeout(() => copyBtn.textContent = 'Copy', 1200);
+      } catch (e) {
+        alert('Không thể copy tự động. Hãy copy thủ công.');
+      }
+    });
+
+    verifyBtn.addEventListener('click', async () => {
+      const pw = verifyText.value || '';
+      const hash = verifyHash.value || '';
+      if (!pw || !hash) {
+        alert('Cần cả mật khẩu và hash để kiểm tra.');
+        return;
+      }
+      verifyBtn.disabled = true;
+      verifyBtn.textContent = 'Checking...';
+      setStatus('Đang kiểm tra...', 'busy');
+      try {
+        const ok = await bcrypt.compare(pw, hash);
+        if (ok) setStatus('Match ✓', 'ok');
+        else setStatus('Not match ✗', 'bad');
+      } catch (e) {
+        console.error(e);
+        setStatus('Lỗi khi kiểm tra', 'bad');
+      } finally {
+        verifyBtn.disabled = false;
+        verifyBtn.textContent = 'Verify';
+      }
+    });
+
+    clearBtn.addEventListener('click', () => {
+      inputText.value = '';
+      outputHash.value = '';
+      verifyText.value = '';
+      verifyHash.value = '';
+      setStatus('', '');
+    });
+
+    // Small UX: paste hash into output area when user generates elsewhere
+    outputHash.addEventListener('dblclick', () => { outputHash.select(); });
+  </script>
+</body>
+</html>
