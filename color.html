@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Color & Gradient Picker</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    :root { --card-bg: #ffffff; }
+    body { background: #f4f7fb; }
+    .card { border-radius: 12px; box-shadow: 0 6px 24px rgba(20,20,50,0.06); }
+    .swatch { width: 36px; height: 36px; border-radius: 6px; border: 1px solid rgba(0,0,0,0.08); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", monospace; }
+    .stop-item { cursor: grab; }
+    .preview { height: 160px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.06); }
+  </style>
+</head>
+<body>
+  <div class="container py-5">
+    <div class="row g-4">
+      <div class="col-lg-5">
+        <div class="card p-4">
+          <h4>Color Picker</h4>
+          <p class="text-muted small">Chọn màu, xem mã HEX / RGB / HSL và thêm vào palette.</p>
+
+          <div class="mb-3">
+            <input id="colorInput" type="color" class="form-control form-control-color" value="#3b82f6" title="Chọn màu">
+          </div>
+
+          <div class="row g-2 mb-3">
+            <div class="col-4">
+              <label class="form-label">HEX</label>
+              <input id="hex" class="form-control mono" readonly>
+            </div>
+            <div class="col-4">
+              <label class="form-label">RGB</label>
+              <input id="rgb" class="form-control mono" readonly>
+            </div>
+            <div class="col-4">
+              <label class="form-label">HSL</label>
+              <input id="hsl" class="form-control mono" readonly>
+            </div>
+          </div>
+
+          <div class="d-flex gap-2 mb-3">
+            <button id="addPalette" class="btn btn-outline-primary">Add to palette</button>
+            <button id="copyHex" class="btn btn-secondary">Copy HEX</button>
+            <button id="randomBtn" class="btn btn-outline-success">Random</button>
+          </div>
+
+          <div id="palette" class="d-flex flex-wrap gap-2"></div>
+        </div>
+
+        <div class="card p-3 mt-3">
+          <h5>Presets</h5>
+          <div class="d-flex gap-2 flex-wrap">
+            <button class="preset btn btn-outline-light" data-colors="#ff7a7a,#ffd67a">Sunset</button>
+            <button class="preset btn btn-outline-light" data-colors="#34d399,#60a5fa">Mint/Blue</button>
+            <button class="preset btn btn-outline-light" data-colors="#f97316,#ef4444,#f43f5e">Warm</button>
+            <button class="preset btn btn-outline-light" data-colors="#a78bfa,#60a5fa,#34d399">Vivid</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-lg-7">
+        <div class="card p-4">
+          <h4>Gradient Builder</h4>
+          <p class="text-muted small">Tạo gradient nhiều stop, chỉnh góc, vị trí stop và copy CSS.</p>
+
+          <div class="mb-3">
+            <label class="form-label">Angle (deg)</label>
+            <input id="angle" type="range" min="0" max="360" value="90" class="form-range">
+            <div class="d-flex justify-content-between small"><span>0</span><span id="angleVal">90°</span><span>360</span></div>
+          </div>
+
+          <div id="stopsList" class="mb-3"></div>
+
+          <div class="d-flex gap-2 mb-3">
+            <button id="addStop" class="btn btn-outline-primary">+ Add stop</button>
+            <button id="reverseBtn" class="btn btn-outline-secondary">Reverse</button>
+            <button id="exportCss" class="btn btn-primary">Copy CSS</button>
+            <button id="downloadPNG" class="btn btn-outline-success">Download PNG</button>
+          </div>
+
+          <div class="mb-3">
+            <div id="preview" class="preview"></div>
+          </div>
+
+          <label class="form-label">CSS output</label>
+          <textarea id="cssOutput" class="form-control mono" rows="3" readonly></textarea>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Utils: color conversions
+    function hexToRgb(hex) {
+      const h = hex.replace('#','');
+      const bigint = parseInt(h, 16);
+      return [(bigint >> 16) & 255, (bigint >> 8) & 255, bigint & 255];
+    }
+    function rgbToHsl(r,g,b){
+      r/=255; g/=255; b/=255;
+      const max=Math.max(r,g,b), min=Math.min(r,g,b);
+      let h,s,l=(max+min)/2;
+      if(max===min){h=s=0;}else{const d=max-min;s=l>0.5?d/(2-max-min):d/(max+min);switch(max){case r:h=(g-b)/d+(g<b?6:0);break;case g:h=(b-r)/d+2;break;case b:h=(r-g)/d+4;break;}h/=6;}return [Math.round(h*360), Math.round(s*100), Math.round(l*100)];
+    }
+
+    // Elements
+    const colorInput = document.getElementById('colorInput');
+    const hexEl = document.getElementById('hex');
+    const rgbEl = document.getElementById('rgb');
+    const hslEl = document.getElementById('hsl');
+    const addPaletteBtn = document.getElementById('addPalette');
+    const paletteEl = document.getElementById('palette');
+    const copyHexBtn = document.getElementById('copyHex');
+    const randomBtn = document.getElementById('randomBtn');
+
+    function updateColorDisplays(hex) {
+      const rgb = hexToRgb(hex);
+      const hsl = rgbToHsl(...rgb);
+      hexEl.value = hex.toUpperCase();
+      rgbEl.value = `rgb(${rgb.join(', ')})`;
+      hslEl.value = `hsl(${hsl[0]} ${hsl[1]}% ${hsl[2]}%)`;
+    }
+
+    colorInput.addEventListener('input', (e)=> updateColorDisplays(e.target.value));
+    updateColorDisplays(colorInput.value);
+
+    addPaletteBtn.addEventListener('click', ()=>{
+      const c = colorInput.value;
+      const item = document.createElement('div');
+      item.className = 'd-flex align-items-center gap-2 p-1';
+      item.innerHTML = `<div class="swatch" style="background:${c}"></div><input class="form-control form-control-sm mono" value="${c}" readonly style="width:110px"><button class='btn btn-sm btn-outline-danger'>X</button>`;
+      const del = item.querySelector('button');
+      del.addEventListener('click', ()=> paletteEl.removeChild(item));
+      paletteEl.appendChild(item);
+    });
+
+    copyHexBtn.addEventListener('click', async ()=>{
+      try{ await navigator.clipboard.writeText(hexEl.value); copyHexBtn.textContent='Copied!'; setTimeout(()=>copyHexBtn.textContent='Copy HEX',1200);}catch(e){alert('Không thể copy tự động');}
+    });
+
+    randomBtn.addEventListener('click', ()=>{
+      const rand = '#'+Math.floor(Math.random()*16777215).toString(16).padStart(6,'0');
+      colorInput.value = rand; updateColorDisplays(rand);
+    });
+
+    // Presets
+    document.querySelectorAll('.preset').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const cols = btn.dataset.colors.split(',');
+        // reset gradient stops
+        stops = cols.map((c,i)=>({color:c.trim(),pos: Math.round((i/(cols.length-1))*100)}));
+        renderStops();
+      });
+    });
+
+    // Gradient builder state
+    let stops = [ {color:'#3b82f6', pos:0}, {color:'#06b6d4', pos:100} ];
+    const stopsList = document.getElementById('stopsList');
+    const angle = document.getElementById('angle');
+    const angleVal = document.getElementById('angleVal');
+    const addStopBtn = document.getElementById('addStop');
+    const preview = document.getElementById('preview');
+    const cssOutput = document.getElementById('cssOutput');
+    const exportCssBtn = document.getElementById('exportCss');
+    const reverseBtn = document.getElementById('reverseBtn');
+    const downloadPNGBtn = document.getElementById('downloadPNG');
+
+    function renderStops(){
+      stopsList.innerHTML = '';
+      stops.forEach((s, idx)=>{
+        const wrapper = document.createElement('div');
+        wrapper.className = 'd-flex align-items-center gap-2 mb-2 stop-item';
+        wrapper.innerHTML = `
+          <input type='color' class='form-control form-control-color' value='${s.color}' data-idx='${idx}'>
+          <input type='number' class='form-control form-control-sm mono' min='0' max='100' value='${s.pos}' data-idx='${idx}' style='width:100px'>
+          <div class='flex-grow-1'><div class='progress' style='height:8px'><div class='progress-bar' role='progressbar' style='width:${s.pos}%'></div></div></div>
+          <button class='btn btn-sm btn-outline-danger' data-del='${idx}'>Del</button>
+        `;
+        // events
+        const colorInp = wrapper.querySelector("input[type='color']");
+        const numInp = wrapper.querySelector("input[type='number']");
+        const delBtn = wrapper.querySelector('button');
+        colorInp.addEventListener('input', (e)=>{ stops[idx].color = e.target.value; updateAll(); });
+        numInp.addEventListener('input', (e)=>{ stops[idx].pos = Math.max(0, Math.min(100, parseInt(e.target.value)||0)); updateAll(); });
+        delBtn.addEventListener('click', ()=>{ stops.splice(idx,1); renderStops(); updateAll(); });
+        stopsList.appendChild(wrapper);
+      });
+      updateAll();
+    }
+
+    function buildGradientCss(){
+      const sorted = [...stops].sort((a,b)=>a.pos-b.pos);
+      const stopsStr = sorted.map(s=>`${s.color} ${s.pos}%`).join(', ');
+      const ang = angle.value;
+      return `background: linear-gradient(${ang}deg, ${stopsStr});`;
+    }
+
+    function updateAll(){
+      // preview
+      preview.style.background = buildGradientCss();
+      // css output
+      cssOutput.value = buildGradientCss();
+      angleVal.textContent = angle.value + '°';
+    }
+
+    angle.addEventListener('input', updateAll);
+    addStopBtn.addEventListener('click', ()=>{ stops.push({color:'#ffffff', pos:50}); renderStops(); });
+    reverseBtn.addEventListener('click', ()=>{ stops.reverse(); renderStops(); });
+
+    exportCssBtn.addEventListener('click', async ()=>{
+      try{ await navigator.clipboard.writeText(cssOutput.value); exportCssBtn.textContent='Copied!'; setTimeout(()=>exportCssBtn.textContent='Copy CSS',1200);}catch(e){alert('Không thể copy tự động');}
+    });
+
+    // Download PNG - draw preview to canvas
+    downloadPNGBtn.addEventListener('click', ()=>{
+      const w=1200, h=600;
+      const canvas = document.createElement('canvas'); canvas.width=w; canvas.height=h;
+      const ctx = canvas.getContext('2d');
+      // create gradient
+      const rad = angle.value * Math.PI/180; // not perfect mapping but OK for demo
+      const x0 = w/2 - Math.cos(rad)*w/2, y0 = h/2 - Math.sin(rad)*h/2;
+      const x1 = w/2 + Math.cos(rad)*w/2, y1 = h/2 + Math.sin(rad)*h/2;
+      const g = ctx.createLinearGradient(x0,y0,x1,y1);
+      stops.sort((a,b)=>a.pos-b.pos).forEach(s=> g.addColorStop(s.pos/100, s.color));
+      ctx.fillStyle = g; ctx.fillRect(0,0,w,h);
+      const url = canvas.toDataURL('image/png');
+      const a = document.createElement('a'); a.href = url; a.download = 'gradient.png'; a.click();
+    });
+
+    // init
+    renderStops();
+
+  </script>
+</body>
+</html>
