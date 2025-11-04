@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Trình tạo mã 2FA (TOTP) — Dựa trên string</title>
+<style>
+  :root{--bg:#0f1724;--card:#0b1220;--muted:#94a3b8;--accent:#10b981;--glass:rgba(255,255,255,0.03)}
+  body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial;background:linear-gradient(180deg,#071024 0%, #071634 100%);color:#e6eef8;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:24px}
+  .card{background:var(--card);border-radius:12px;padding:20px;max-width:760px;width:100%;box-shadow:0 6px 30px rgba(2,6,23,0.6);border:1px solid rgba(255,255,255,0.03)}
+  h1{margin:0 0 6px 0;font-size:20px}
+  p.lead{margin:0 0 18px 0;color:var(--muted);font-size:13px}
+  .grid{display:grid;grid-template-columns:1fr 220px;gap:12px}
+  .field{display:flex;flex-direction:column;gap:6px}
+  label{font-size:13px;color:var(--muted)}
+  input[type="text"], select, input[type="number"]{
+    background:var(--glass);border:1px solid rgba(255,255,255,0.04);padding:10px;border-radius:8px;color:inherit;font-size:14px
+  }
+  .output{display:flex;align-items:center;justify-content:space-between;padding:14px;border-radius:10px;background:linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));margin-top:12px}
+  .code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,"Roboto Mono",monospace;font-size:28px;letter-spacing:6px}
+  .muted{color:var(--muted);font-size:13px}
+  button{background:var(--accent);color:#022;padding:8px 12px;border-radius:8px;border:none;font-weight:600;cursor:pointer}
+  .row{display:flex;gap:8px;align-items:center}
+  .small{font-size:12px;padding:6px 8px;border-radius:8px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.02)}
+  footer{margin-top:14px;color:var(--muted);font-size:13px}
+  @media (max-width:720px){ .grid{grid-template-columns:1fr} .code{font-size:24px} }
+</style>
+</head>
+<body>
+  <div class="card" role="main">
+    <h1>Trình tạo mã 2FA (TOTP)</h1>
+    <p class="lead">Nhập một <strong>string</strong> (Base32 hoặc chuỗi thường). Mã sẽ được sinh theo chuẩn TOTP (RFC 6238).</p>
+
+    <div class="grid">
+      <div>
+        <div class="field">
+          <label for="secret">Secret (Base32 hoặc bất kỳ string)</label>
+          <input id="secret" type="text" placeholder="Ví dụ: JBSWY3DPEHPK3PXP hoặc xanh123!@#">
+        </div>
+
+        <div style="display:flex;gap:8px;margin-top:10px;">
+          <div style="flex:1">
+            <label for="algo">Thuật toán</label>
+            <select id="algo">
+              <option value="SHA-1">SHA-1 (mặc định)</option>
+              <option value="SHA-256">SHA-256</option>
+              <option value="SHA-512">SHA-512</option>
+            </select>
+          </div>
+          <div style="width:120px">
+            <label for="digits">Digits</label>
+            <input id="digits" type="number" min="6" max="8" value="6">
+          </div>
+          <div style="width:100px">
+            <label for="period">Period(s)</label>
+            <input id="period" type="number" min="10" max="120" value="30">
+          </div>
+        </div>
+
+        <div style="margin-top:10px;display:flex;gap:8px;">
+          <button id="genBtn">Sinh mã bây giờ</button>
+          <button id="copyBtn" class="small">Copy mã</button>
+          <button id="parseOtpAuth" class="small" title="Parse otpauth:// URI nếu bạn dán">Parse otpauth://</button>
+        </div>
+
+        <div class="output" style="margin-top:12px;">
+          <div>
+            <div class="muted">Mã hiện tại</div>
+            <div class="code" id="code">------</div>
+            <div class="muted" id="timeLeft">—</div>
+          </div>
+          <div style="text-align:right">
+            <div class="muted">Counter / Step</div>
+            <div id="counter" class="muted">—</div>
+            <div style="height:6px"></div>
+            <div id="algoInfo" class="muted">—</div>
+          </div>
+        </div>
+
+        <footer>
+          Lưu ý: nếu secret là Base32, trình sẽ giải mã Base32; nếu không, trình dùng bytes UTF-8 của string. Mã khớp với Authenticator apps khi secret đúng.
+        </footer>
+      </div>
+
+      <div>
+        <label>Hướng dẫn nhanh</label>
+        <div style="background:rgba(255,255,255,0.02);padding:10px;border-radius:8px;color:var(--muted);font-size:13px">
+          <p style="margin:0 0 8px 0"><strong>Ví dụ secret Base32:</strong><br><code>JBSWY3DPEHPK3PXP</code> (sẽ cho mã giống Google Authenticator nếu đây là secret chính xác).</p>
+          <p style="margin:0 0 8px 0"><strong>Ví dụ string tùy ý:</strong><br><code>my-secret-123</code> — sẽ mã hóa bằng UTF-8 và tạo mã 2FA từ đó.</p>
+          <p style="margin:0">Bạn có thể dán URI otpauth (ví dụ: <code>otpauth://totp/Label?secret=JBSWY3DPEHPK3PXP&period=30&digits=6&algorithm=SHA1</code>) rồi nhấn <strong>Parse otpauth</strong>.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* ---------- Utilities ---------- */
+
+// Base32 decode (A-Z2-7, optional padding =) -> Uint8Array
+function base32Decode(str) {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let cleaned = str.toUpperCase().replace(/[^A-Z2-7=]/g, "");
+  // remove padding for processing but keep track
+  cleaned = cleaned.replace(/=+$/,"");
+  let bits = 0;
+  let value = 0;
+  const bytes = [];
+
+  for (let i = 0; i < cleaned.length; i++) {
+    const idx = alphabet.indexOf(cleaned[i]);
+    if (idx === -1) throw new Error("Không phải Base32 hợp lệ");
+    value = (value << 5) | idx;
+    bits += 5;
+    if (bits >= 8) {
+      bits -= 8;
+      bytes.push((value >>> bits) & 0xFF);
+    }
+  }
+  return new Uint8Array(bytes);
+}
+
+// convert string to Uint8Array (UTF-8)
+function strToUint8(s) {
+  return new TextEncoder().encode(s);
+}
+
+// dynamic int -> 8-byte array (big endian)
+function intTo8Bytes(num) {
+  const arr = new Uint8Array(8);
+  for (let i = 7; i >= 0; i--) {
+    arr[i] = num & 0xff;
+    num = num >> 8;
+  }
+  return arr;
+}
+
+// truncation per RFC4226
+function dynamicTruncate(hmac) {
+  const offset = hmac[hmac.length - 1] & 0x0f;
+  const code = ((hmac[offset] & 0x7f) << 24) |
+               ((hmac[offset + 1] & 0xff) << 16) |
+               ((hmac[offset + 2] & 0xff) << 8) |
+               (hmac[offset + 3] & 0xff);
+  return code >>> 0;
+}
+
+/* ---------- Crypto helpers (WebCrypto) ---------- */
+
+async function importKeyRaw(keyBytes, algo) {
+  // algo e.g. "SHA-1", "SHA-256", "SHA-512"
+  return crypto.subtle.importKey("raw", keyBytes, { name: "HMAC", hash: { name: algo } }, false, ["sign"]);
+}
+
+async function computeHMAC(keyObj, data) {
+  const sig = await crypto.subtle.sign("HMAC", keyObj, data);
+  return new Uint8Array(sig);
+}
+
+/* ---------- TOTP / HOTP ---------- */
+
+// HOTP: given key bytes (Uint8Array), counter (integer), digits, algo -> code
+async function hotpFromKey(keyBytes, counter, digits, algo) {
+  const key = await importKeyRaw(keyBytes, algo);
+  const counterBytes = intTo8Bytes(counter);
+  const hmac = await computeHMAC(key, counterBytes);
+  const codeInt = dynamicTruncate(hmac);
+  const mod = Math.pow(10, digits);
+  const code = (codeInt % mod).toString().padStart(digits, "0");
+  return code;
+}
+
+// TOTP: use time / period to compute counter
+async function totpFromKey(keyBytes, forTime, period, digits, algo) {
+  const counter = Math.floor(forTime / period);
+  const code = await hotpFromKey(keyBytes, counter, digits, algo);
+  return { code, counter };
+}
+
+/* ---------- UI binding & logic ---------- */
+
+const secretEl = document.getElementById("secret");
+const algoEl = document.getElementById("algo");
+const digitsEl = document.getElementById("digits");
+const periodEl = document.getElementById("period");
+const genBtn = document.getElementById("genBtn");
+const codeEl = document.getElementById("code");
+const timeLeftEl = document.getElementById("timeLeft");
+const counterEl = document.getElementById("counter");
+const algoInfoEl = document.getElementById("algoInfo");
+const copyBtn = document.getElementById("copyBtn");
+const parseOtpAuthBtn = document.getElementById("parseOtpAuth");
+
+let lastDisplayed = { code: null, counter: null };
+
+function isLikelyBase32(s) {
+  // check if contains only base32 chars (allow spaces and =)
+  return /^[A-Z2-7= \t\r\n\-]+$/i.test(s) && /[A-Z2-7]/i.test(s);
+}
+
+async function deriveKeyBytesFromInput(input) {
+  input = (input||"").trim();
+  if (!input) throw new Error("Secret rỗng");
+  // detect otpauth uri?
+  const lower = input.toLowerCase();
+  if (lower.startsWith("otpauth://")) {
+    // parse secret param if possible
+    try {
+      const u = new URL(input);
+      const s = u.searchParams.get("secret");
+      if (s) input = s;
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  // If looks like Base32, try decode; otherwise use UTF-8 bytes.
+  if (isLikelyBase32(input)) {
+    try {
+      return base32Decode(input);
+    } catch (e) {
+      // fallback to utf8
+      return strToUint8(input);
+    }
+  } else {
+    return strToUint8(input);
+  }
+}
+
+async function updateNow() {
+  const secret = secretEl.value.trim();
+  if (!secret) {
+    codeEl.textContent = "------";
+    timeLeftEl.textContent = "";
+    counterEl.textContent = "—";
+    algoInfoEl.textContent = "";
+    return;
+  }
+  const algoRaw = algoEl.value; // e.g., "SHA-1"
+  const algo = algoRaw.replace("-", "").toUpperCase(); // "SHA1" not used; WebCrypto expects "SHA-1" etc
+  const digits = parseInt(digitsEl.value, 10) || 6;
+  const period = parseInt(periodEl.value, 10) || 30;
+
+  let keyBytes;
+  try {
+    keyBytes = await deriveKeyBytesFromInput(secret);
+  } catch (e) {
+    codeEl.textContent = "Lỗi secret";
+    timeLeftEl.textContent = e.message;
+    return;
+  }
+
+  // current UNIX time in seconds
+  const now = Math.floor(Date.now() / 1000);
+  const step = Math.floor(now / period);
+  const timeUntil = period - (now % period);
+
+  try {
+    // webcrypto expects hash names "SHA-1","SHA-256","SHA-512"
+    const algoName = algoRaw;
+    const r = await totpFromKey(keyBytes, now, period, digits, algoName);
+    codeEl.textContent = r.code;
+    timeLeftEl.textContent = `Còn ${timeUntil}s`;
+    counterEl.textContent = `${r.counter} (step)`;
+    algoInfoEl.textContent = `${algoName}, ${digits} chữ số, period ${period}s`;
+    lastDisplayed = { code: r.code, counter: r.counter };
+  } catch (e) {
+    codeEl.textContent = "Lỗi tính toán";
+    timeLeftEl.textContent = e.message;
+  }
+}
+
+let timerHandle = null;
+function startTicker() {
+  if (timerHandle) clearInterval(timerHandle);
+  timerHandle = setInterval(updateNow, 1000);
+  updateNow();
+}
+
+genBtn.addEventListener("click", updateNow);
+copyBtn.addEventListener("click", async () => {
+  try {
+    const txt = codeEl.textContent.trim();
+    await navigator.clipboard.writeText(txt);
+    copyBtn.textContent = "Đã copy";
+    setTimeout(()=>copyBtn.textContent="Copy mã",1000);
+  } catch (e) {
+    copyBtn.textContent = "Copy lỗi";
+    setTimeout(()=>copyBtn.textContent="Copy mã",1000);
+  }
+});
+
+// parse otpauth:// URI into fields
+parseOtpAuthBtn.addEventListener("click", () => {
+  const v = secretEl.value.trim();
+  if (!v.toLowerCase().startsWith("otpauth://")) {
+    // maybe user pasted whole URI in secret field; try prompt fallback
+    alert("Hãy dán URI otpauth:// vào ô secret rồi nhấn Parse otpauth.");
+    return;
+  }
+  try {
+    const u = new URL(v);
+    const params = u.searchParams;
+    const s = params.get("secret");
+    if (s) secretEl.value = s;
+    const p = params.get("period"); if (p) periodEl.value = p;
+    const d = params.get("digits"); if (d) digitsEl.value = d;
+    const a = params.get("algorithm"); if (a) {
+      // normalize e.g. SHA1 -> SHA-1
+      const alg = a.toUpperCase().replace(/\s+/,"");
+      if (alg === "SHA1" || alg === "SHA-1") algoEl.value = "SHA-1";
+      if (alg === "SHA256" || alg === "SHA-256") algoEl.value = "SHA-256";
+      if (alg === "SHA512" || alg === "SHA-512") algoEl.value = "SHA-512";
+    }
+    updateNow();
+  } catch (e) {
+    alert("Không thể parse otpauth URI: " + e.message);
+  }
+});
+
+// auto update when user changes inputs
+[secretEl, algoEl, digitsEl, periodEl].forEach(el=>{
+  el.addEventListener("input", ()=> {
+    // immediate update but keep ticker running
+    updateNow();
+  });
+});
+
+startTicker();
+
+</script>
+</body>
+</html>
